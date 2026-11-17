@@ -7,6 +7,7 @@ import { BehaviorSubject, Observable, shareReplay } from 'rxjs';
 export class LocalStorageService {
 
   private PARTICLES = 'PARTICLES';
+  private AUTO_REFRESH = 'AUTO_REFRESH';
 
   private _particles$: BehaviorSubject<boolean>;
   public particles$: Observable<boolean>;
@@ -38,6 +39,14 @@ export class LocalStorageService {
     this.set(this.PARTICLES, JSON.stringify({ particles }));
     this._particles$.next(particles);
 
+  }
+
+  public getAutoRefresh(): boolean {
+    return this.get(this.AUTO_REFRESH) === 'true';
+  }
+
+  public setAutoRefresh(autoRefresh: boolean) {
+    this.set(this.AUTO_REFRESH, String(autoRefresh));
   }
 
 

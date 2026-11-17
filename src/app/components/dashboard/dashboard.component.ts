@@ -1,12 +1,30 @@
 import { AfterViewInit, Component, ViewChild } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { Table } from 'primeng/table';
-import { combineLatest, map, Observable, shareReplay } from 'rxjs';
+import { BehaviorSubject, combineLatest, map, Observable, of, shareReplay, switchMap, take, timer } from 'rxjs';
 
 import { HashSuffixPipe } from '../../pipes/hash-suffix.pipe';
 import { AppService } from '../../services/app.service';
 import { ClientService } from '../../services/client.service';
 import { AverageTimeToBlockPipe } from 'src/app/pipes/average-time-to-block.pipe';
+import { LocalStorageService } from '../../services/local-storage.service';
+import {
+  chanceWithin, expectedSeconds, formatDuration, formatOneIn, formatPercent,
+  SECONDS_PER_BLOCK, SECONDS_PER_DAY, SECONDS_PER_MONTH, SECONDS_PER_YEAR
+} from '../../utils/block-odds';
+
+const AUTO_REFRESH_MS = 60_000;
+// Odds use the average of the last hour of 10-minute chart points; a single
+// 10-minute reading swings too much to base odds on.
+const ODDS_AVERAGE_POINTS = 6;
+
+const CHAIN_NAMES: { [chain: string]: string } = {
+  main: 'mainnet',
+  test: 'testnet3',
+  testnet4: 'testnet4',
+  signet: 'signet',
+  regtest: 'regtest'
+};
 
 
 
@@ -27,6 +45,11 @@ export class DashboardComponent implements AfterViewInit {
   public networkInfo$: Observable<any>;
   private networkInfo:any;
 
+  public odds$: Observable<any>;
+
+  public autoRefresh: boolean;
+  private autoRefresh$: BehaviorSubject<boolean>;
+
   @ViewChild('dataTable') dataTable!: Table;
 
   public expandedRows$: Observable<any>;
@@ -36,19 +59,28 @@ export class DashboardComponent implements AfterViewInit {
   constructor(
     private clientService: ClientService,
     private route: ActivatedRoute,
-    private appService: AppService
+    private appService: AppService,
+    private localStorageService: LocalStorageService
   ) {
 
-    this.networkInfo$ = this.appService.getNetworkInfo().pipe(
+    this.autoRefresh = this.localStorageService.getAutoRefresh();
+    this.autoRefresh$ = new BehaviorSubject<boolean>(this.autoRefresh);
+    // Emits once now, then every minute while auto refresh is on.
+    const trigger$ = this.autoRefresh$.pipe(
+      switchMap(on => on ? timer(0, AUTO_REFRESH_MS) : of(0))
+    );
+    const reload = <T>(load: () => Observable<T>) => trigger$.pipe(
+      switchMap(() => load()),
       shareReplay({ refCount: true, bufferSize: 1 })
     );
+
+    this.networkInfo$ = reload(() => this.appService.getNetworkInfo());
 
     this.address = this.route.snapshot.params['address'];
-    this.clientInfo$ = this.clientService.getClientInfo(this.address).pipe(
-      shareReplay({ refCount: true, bufferSize: 1 })
-    );
+    this.clientInfo$ = reload(() => this.clientService.getClientInfo(this.address));
 
-    this.expandedRows$ = this.clientInfo$.pipe(map((info: any) => {
+    // take(1): an auto refresh must not re-expand rows the user collapsed.
+    this.expandedRows$ = this.clientInfo$.pipe(take(1), map((info: any) => {
 
       return info.workers.reduce((pre: any, cur: any) => { pre[cur.name] = true; return pre; }, {});
 
@@ -60,7 +92,13 @@ export class DashboardComponent implements AfterViewInit {
     const surfaceBorder = documentStyle.getPropertyValue('--surface-border');
 
 
-    this.chartData$ = combineLatest([this.clientService.getClientInfoChart(this.address),  this.networkInfo$]).pipe(
+    const clientChart$ = reload(() => this.clientService.getClientInfoChart(this.address));
+
+    this.odds$ = combineLatest([clientChart$, this.clientInfo$, this.networkInfo$]).pipe(
+      map(([chartData, clientInfo, networkInfo]) => this.calculateOdds(chartData, clientInfo, networkInfo))
+    );
+
+    this.chartData$ = combineLatest([clientChart$, this.networkInfo$]).pipe(
       map(([chartData, networkInfo]) => {
 
         this.networkInfo = networkInfo;
@@ -159,6 +197,45 @@ export class DashboardComponent implements AfterViewInit {
 
   ngAfterViewInit() {
 
+  }
+
+  public autoRefreshChanged(on: boolean) {
+    this.localStorageService.setAutoRefresh(on);
+    this.autoRefresh$.next(on);
+  }
+
+  private calculateOdds(chartData: any[], clientInfo: any, networkInfo: any) {
+    const recent = (chartData ?? []).slice(-ODDS_AVERAGE_POINTS).map((d: any) => Number(d.data)).filter(v => v > 0);
+    const averaged = recent.length > 0;
+    const hashRate = averaged
+      ? recent.reduce((a: number, b: number) => a + b, 0) / recent.length
+      : (clientInfo?.workers ?? []).reduce((a: number, w: any) => a + (Number(w.hashRate) || 0), 0);
+    const difficulty = networkInfo.difficulty;
+    const window = (label: string, seconds: number) => {
+      const chance = chanceWithin(hashRate, difficulty, seconds);
+      return { label, percent: formatPercent(chance), oneIn: formatOneIn(chance) };
+    };
+    return {
+      chain: CHAIN_NAMES[networkInfo.chain] ?? networkInfo.chain,
+      hashRate,
+      hashRateSource: averaged ? `${recent.length * 10} min avg` : 'current',
+      windows: [
+        window('Per block', SECONDS_PER_BLOCK),
+        window('Per day', SECONDS_PER_DAY),
+        window('Per month', SECONDS_PER_MONTH),
+        window('Per year', SECONDS_PER_YEAR)
+      ],
+      expected: formatDuration(expectedSeconds(hashRate, difficulty))
+    };
+  }
+
+  public getDailyChance(name: string, workers: any[], difficulty: number) {
+    const chance = chanceWithin(this.getTotalHashRate(name, workers), difficulty, SECONDS_PER_DAY);
+    return `${formatPercent(chance)} (${formatOneIn(chance)})`;
+  }
+
+  public getBestDifficultyPercent(bestDifficulty: number, difficulty: number) {
+    return formatPercent(difficulty > 0 ? bestDifficulty / difficulty : 0);
   }
 
   public getSessionCount(name: string, workers: any[]) {

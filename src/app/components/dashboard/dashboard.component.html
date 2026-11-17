@@ -1,4 +1,9 @@
 <ng-container>
+    <div class="flex justify-content-end align-items-center mb-3">
+        <label for="autoRefresh" class="text-500 font-medium mr-2">Auto refresh (1 min)</label>
+        <p-inputSwitch inputId="autoRefresh" [(ngModel)]="autoRefresh"
+            (ngModelChange)="autoRefreshChanged($event)"></p-inputSwitch>
+    </div>
     <div class="grid">
         <div class="col-12 lg:col-6 xl:col-3">
 
@@ -25,8 +30,13 @@
                 </div>
                 <span class="text-green-500 font-medium">
 
-                    <ng-container *ngIf="clientInfo$ | async as clientInfo; else loading">{{clientInfo.bestDifficulty |
-                        number}}</ng-container>
+                    <ng-container *ngIf="{ client: clientInfo$ | async, network: networkInfo$ | async } as d">
+                        <ng-container *ngIf="d.client && d.network; else loading">
+                            <span [pTooltip]="(d.client.bestDifficulty | number) ?? ''">
+                                {{getBestDifficultyPercent(d.client.bestDifficulty, d.network.difficulty)}} of network
+                                difficulty</span>
+                        </ng-container>
+                    </ng-container>
                     <ng-template #loading>
                         <p-skeleton></p-skeleton>
                     </ng-template>
@@ -106,6 +116,30 @@
                 </div>
             </div>
         </ng-container>
+        <div class="col-12">
+            <div class="card mb-4">
+                <ng-container *ngIf="odds$ | async as odds; else loadingOdds">
+                    <div class="flex justify-content-between flex-wrap mb-3">
+                        <span class="block text-500 font-medium">Your Block Odds
+                            <span class="ml-2 px-2 py-1 border-round bg-primary text-sm">{{odds.chain}}</span>
+                            <i class="pi pi-question-circle ml-2"
+                                pTooltip="Solo mining is a lottery: every hash has the same 1 in (difficulty × 2^32) chance. Chance of at least one block in time t = 1 − e^(−hashrate × t / (difficulty × 2^32))."></i>
+                        </span>
+                        <span class="text-500">Based on {{odds.hashRate | hashSuffix}} ({{odds.hashRateSource}})</span>
+                    </div>
+                    <div class="grid">
+                        <div class="col-6 md:col-3" *ngFor="let w of odds.windows">
+                            <span class="block text-500 mb-1">{{w.label}}</span>
+                            <div class="text-900 font-medium text-xl">{{w.percent}}</div>
+                            <span class="text-green-500 font-medium">{{w.oneIn}}</span>
+                        </div>
+                    </div>
+                    <div class="mt-3 text-500">Expected time to a block at this hashrate:
+                        <span class="text-900 font-medium">{{odds.expected}}</span></div>
+                </ng-container>
+                <ng-template #loadingOdds><p-skeleton height="6rem"></p-skeleton></ng-template>
+            </div>
+        </div>
     </div>
     <div class="card">
         <ng-container *ngIf="clientInfo$ | async as clientInfo; else loadingTable">
@@ -120,6 +154,7 @@
                         <th>Session ID</th>
                         <th>Hash Rate</th>
                         <th>Session Best Difficulty</th>
+                        <th>Chance / day</th>
                         <th>Uptime</th>
                         <th>Last Seen</th>
                     </tr>
@@ -146,6 +181,11 @@
                             {{getBestDifficulty(worker.name, clientInfo.workers) | numberSuffix}}
                         </td>
                         <td>
+                            <ng-container *ngIf="networkInfo$ | async as networkInfo">
+                                {{getDailyChance(worker.name, clientInfo.workers, networkInfo.difficulty)}}
+                            </ng-container>
+                        </td>
+                        <td>
 
                         </td>
                         <td></td>
@@ -159,6 +199,7 @@
                         <td>{{worker.sessionId}}</td>
                         <td>{{worker.hashRate | hashSuffix}}</td>
                         <td>{{worker.bestDifficulty | numberSuffix}}</td>
+                        <td></td>
                         <td>{{worker.startTime | dateAgo}}</td>
                         <td>{{worker.lastSeen | dateAgo}}</td>
                     </tr>
@@ -179,6 +220,7 @@
                         <th>Session ID</th>
                         <th>Hash Rate</th>
                         <th>Session Best Difficulty</th>
+                        <th>Chance / day</th>
                         <th>Uptime</th>
                         <th>Last Seen</th>
                     </tr>
@@ -204,6 +246,9 @@
                             <p-skeleton></p-skeleton>
                         </td>
                         <td>
+                            <p-skeleton></p-skeleton>
+                        </td>
+                        <td>
 
                         </td>
                         <td></td>
@@ -219,6 +264,7 @@
                         <td><p-skeleton></p-skeleton></td>
                         <td><p-skeleton></p-skeleton></td>
                         <td><p-skeleton></p-skeleton></td>
+                        <td></td>
                     </tr>
                 </ng-template>
 
