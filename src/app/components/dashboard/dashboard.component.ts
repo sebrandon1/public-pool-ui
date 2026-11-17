@@ -14,9 +14,10 @@ import {
 } from '../../utils/block-odds';
 
 const AUTO_REFRESH_MS = 60_000;
-// Odds use the average of the last hour of 10-minute chart points; a single
-// 10-minute reading swings too much to base odds on.
-const ODDS_AVERAGE_POINTS = 6;
+// Odds use the average of the last hour of chart points; a single 10-minute
+// reading swings too much to base odds on.
+const CHART_POINT_MINUTES = 10;
+const ODDS_AVERAGE_POINTS = 60 / CHART_POINT_MINUTES;
 
 const CHAIN_NAMES: { [chain: string]: string } = {
   main: 'mainnet',
@@ -211,19 +212,19 @@ export class DashboardComponent implements AfterViewInit {
       ? recent.reduce((a: number, b: number) => a + b, 0) / recent.length
       : (clientInfo?.workers ?? []).reduce((a: number, w: any) => a + (Number(w.hashRate) || 0), 0);
     const difficulty = networkInfo.difficulty;
-    const window = (label: string, seconds: number) => {
+    const oddsFor = (label: string, seconds: number) => {
       const chance = chanceWithin(hashRate, difficulty, seconds);
       return { label, percent: formatPercent(chance), oneIn: formatOneIn(chance) };
     };
     return {
       chain: CHAIN_NAMES[networkInfo.chain] ?? networkInfo.chain,
       hashRate,
-      hashRateSource: averaged ? `${recent.length * 10} min avg` : 'current',
+      hashRateSource: averaged ? `${recent.length * CHART_POINT_MINUTES} min avg` : 'current',
       windows: [
-        window('Per block', SECONDS_PER_BLOCK),
-        window('Per day', SECONDS_PER_DAY),
-        window('Per month', SECONDS_PER_MONTH),
-        window('Per year', SECONDS_PER_YEAR)
+        oddsFor('Per block', SECONDS_PER_BLOCK),
+        oddsFor('Per day', SECONDS_PER_DAY),
+        oddsFor('Per month', SECONDS_PER_MONTH),
+        oddsFor('Per year', SECONDS_PER_YEAR)
       ],
       expected: formatDuration(expectedSeconds(hashRate, difficulty))
     };
